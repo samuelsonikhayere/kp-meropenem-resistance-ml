@@ -1,0 +1,10 @@
+﻿pandas>=2.3
+numpy>=2.4
+scikit-learn>=1.9
+xgboost>=3.0
+matplotlib>=3.8
+seaborn>=0.13
+requests>=2.34
+tqdm>=4.0
+openpyxl>=3.1
+tabulate>=0.9
