@@ -1,0 +1,31 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+
+# Environments
+env/
+.venv/
+venv/
+
+# Data - goes to Zenodo, not GitHub
+raw_data/
+processed/
+results/
+figures/
+logs/
+provenance/
+manuscript/
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Checkpoints
+processed/_*.csv
+
+# Local setup scripts (contain credentials)
+scripts/_*.ps1
