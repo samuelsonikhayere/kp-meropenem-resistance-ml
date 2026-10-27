@@ -2,7 +2,7 @@
 
 Authors: Samson Samuel Ikhayere (ORCID 0009-0003-9533-2314), Ejiakhila Amelia Omono (ORCID 0009-0001-9407-1226). University of Benin, Benin City, Nigeria.
 
-This repository holds the analysis code behind the manuscript. Results, figures, logs and processed tables are archived on Zenodo (DOI: [ZENODO DOI TO FILL]). All reported values come from a run on Windows 10 with Python 3.11.17, pandas 2.3.3, numpy 2.4.6, scikit-learn 1.9.1 and XGBoost 3.2.0 (see `results/software_versions.json` and `env/requirements.txt`).
+This repository holds the analysis code behind the manuscript. Results, figures, logs and processed tables are archived on Zenodo (https://doi.org/10.5281/zenodo.23687655). All reported values come from a run on Windows 10 with Python 3.11.17, pandas 2.3.3, numpy 2.4.6, scikit-learn 1.9.1 and XGBoost 3.2.0 (see `results/software_versions.json` and `env/requirements.txt`).
 
 ## Contents (in the Zenodo archive; the repository holds `scripts/` and `env/`)
 - `scripts/`: analysis code. `00b` to `06` download the data from BV-BRC and build the cohort and feature matrix. `07` to `22` run the analysis and make the figures and tables. `run_all.py` runs `00_setup` and `04` to `22` in order from the processed tables (the download scripts are not re-run).
