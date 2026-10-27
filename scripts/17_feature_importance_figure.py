@@ -1,70 +1,18 @@
-"""
-17_feature_importance_figure.py — Figure 6: top features.
+"""17: Figure 6, the 15 strongest features in each model."""
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent))
+from fig_style import *
+from sklearn.metrics import roc_curve, precision_recall_curve, confusion_matrix
 
-Two side-by-side panels:
-  A. Logistic regression — top 15 by |coefficient|
-  B. XGBoost           — top 15 by importance
-"""
-
-from __future__ import annotations
-import textwrap
-from importlib.machinery import SourceFileLoader
-from pathlib import Path as _P
-
-import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
-
-setup = SourceFileLoader("setup", str(_P(__file__).parent / "00_setup.py")).load_module()
-log = setup.get_logger("17_feature_importance_figure")
-
-lr  = pd.read_csv(setup.RESULTS / "table7_features_logreg.csv")
-xgb = pd.read_csv(setup.RESULTS / "table7_features_xgboost.csv")
-
-
-def short_label(s, width=48):
-    s = s.replace("(EC ", "(EC ").strip()
-    return "\n".join(textwrap.wrap(s, width=width))[:140]
-
-
-def plot_panel(ax, df, value_col, title, color, top_n=15):
-    top = df.head(top_n).iloc[::-1]
-    y = np.arange(len(top))
-    ax.barh(y, top[value_col],
-            color=color, edgecolor="#222", linewidth=0.5)
-    ax.set_yticks(y)
-    ax.set_yticklabels([short_label(s) for s in top["feature"]], fontsize=7)
-    ax.set_title(title, fontsize=9.5)
-    ax.grid(axis="x", linestyle=":", linewidth=0.5, alpha=0.5)
-    ax.set_axisbelow(True)
-    ax.tick_params(axis="x", labelsize=8)
-
-
-fig, axes = plt.subplots(1, 2, figsize=(13, 5.2))
-
-plot_panel(
-    axes[0],
-    lr.sort_values("abs_coefficient", ascending=False),
-    "abs_coefficient",
-    "Logistic regression — top 15 by |coefficient|",
-    "#3b6fb5",
-)
-axes[0].set_xlabel("|Coefficient|")
-
-plot_panel(
-    axes[1],
-    xgb,
-    "importance",
-    "XGBoost — top 15 by importance",
-    "#c1573b",
-)
-axes[1].set_xlabel("Importance")
-
-fig.suptitle("Feature importance identifies established carbapenem-resistance "
-             "determinants", fontsize=10.5, fontweight="bold", y=1.00)
-fig.tight_layout()
-fig.savefig(setup.FIGURES / "figure6_feature_importance.pdf", bbox_inches="tight")
-fig.savefig(setup.FIGURES / "figure6_feature_importance.png",
-            bbox_inches="tight", dpi=300)
-plt.close(fig)
-log.info("Saved: figures/figure6_feature_importance.pdf / .png")
+t = pd.read_csv(S.RESULTS / "table7_features_logreg.csv")
+l = t.sort_values("coefficient", key=abs, ascending=False).head(15).iloc[::-1]; x = t.sort_values("xgb_importance", ascending=False).head(15).iloc[::-1]
+fig, (a, b) = plt.subplots(1, 2, figsize=(9.0, 4.4))
+col = lambda d: [C["xgb"] if c else C["grey"] for c in d.carbapenemase_product]
+a.barh(range(15), l.coefficient, color=[C["xgb"] if c else (C["lr"] if v > 0 else "#7FB2D6") for c, v in zip(l.carbapenemase_product, l.coefficient)], height=.7)
+a.set_yticks(range(15)); a.set_yticklabels([short(n) for n in l.feature], fontsize=7); a.axvline(0, color="k", lw=.8); a.set_xlabel("Logistic regression coefficient"); letter(a, "A", -.9)
+b.barh(range(15), x.xgb_importance, color=col(x), height=.7); b.set_yticks(range(15)); b.set_yticklabels([short(n) for n in x.feature], fontsize=7); b.set_xlabel("XGBoost importance (gain share)"); letter(b, "B", -.9)
+from matplotlib.patches import Patch
+fig.legend(handles=[Patch(color=C["xgb"], label="Carbapenemase product"), Patch(color=C["lr"], label="Other, raises predicted risk"), Patch(color="#7FB2D6", label="Other, lowers predicted risk"), Patch(color=C["grey"], label="Other product (XGBoost)")],
+           loc="lower center", ncol=4, frameon=False, bbox_to_anchor=(.5, -.04))
+fig.tight_layout(rect=(0, .03, 1, 1)); save(fig, "Figure6_feature_importance")

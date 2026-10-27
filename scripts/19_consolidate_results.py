@@ -1,130 +1,35 @@
-"""
-19_consolidate_results.py — Assemble all manuscript numbers into one file.
-
-Reads every results/ table and produces results/MANUSCRIPT_NUMBERS.md and
-results/MANUSCRIPT_NUMBERS.json.
-"""
-
-from __future__ import annotations
-import json
-from datetime import datetime, timezone
-from importlib.machinery import SourceFileLoader
-from pathlib import Path as _P
-
+"""19: gather every manuscript number into results/MANUSCRIPT_NUMBERS.json and .md, and write the supplementary tables to one workbook.
+Run last. If a number in the paper is not here, it should not be in the paper."""
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent))
+import importlib, json; S = importlib.import_module("00_setup")
 import pandas as pd
-
-setup = SourceFileLoader("setup", str(_P(__file__).parent / "00_setup.py")).load_module()
-log = setup.get_logger("19_consolidate_results")
-
-
-def safe_read_csv(name):
-    p = setup.RESULTS / name
-    return pd.read_csv(p) if p.exists() else None
-
-
-cascade        = safe_read_csv("table2_filter_cascade.csv")
-region_primary = safe_read_csv("table3_region_distribution.csv")
-model_perf     = safe_read_csv("table4_model_performance.csv")
-boot_cis       = safe_read_csv("tableS4_bootstrap_cis.csv")
-baselines      = safe_read_csv("tableS3_baselines.csv")
-feature_summ   = safe_read_csv("tableS2_feature_matrix_summary.csv")
-singlesource   = safe_read_csv("tableS1_single_source_effect.csv")
-lr_loo         = safe_read_csv("table5_region_holdout__logistic_regression.csv")
-
-with open(setup.RESULTS / "08_model_results.json", encoding="utf-8") as f:
-    model_results = json.load(f)
-
-primary = pd.read_csv(setup.PROCESSED / "06_analysis_table.csv", low_memory=False)
-full    = pd.read_csv(setup.PROCESSED / "06_analysis_table_full.csv", low_memory=False)
-assert len(full) == 3930
-assert len(primary) == 3694
-africa = primary[primary["region"] == "Africa"]
-assert len(africa) == 79
-
-feat_cols = setup.feature_columns(primary)
-
-# ── Build markdown ───────────────────────────────────────────────────────
-md = []
-md.append("# Manuscript numbers — auto-generated\n")
-md.append(f"Generated: {datetime.now(timezone.utc).isoformat()}\n")
-
-md.append("## Cohort")
-md.append(f"- Verified cohort (analysis denominator): **{len(full)}** isolates")
-md.append(f"- Annotated feature matrix (primary): **{len(primary)}** isolates")
-md.append(f"- Genomes without AMR annotation: **{len(full) - len(primary)}**")
-md.append(f"- African test isolates: **{len(africa)}**")
-md.append(f"- Features: **{len(feat_cols)}** AMR products")
-md.append("")
-
-md.append("## Filter cascade")
-if cascade is not None:
-    md.append(cascade.to_markdown(index=False))
-    md.append("")
-
-md.append("## Regional distribution (primary mapping)")
-if region_primary is not None:
-    md.append(region_primary.to_markdown(index=False))
-    md.append("")
-
-md.append("## Model performance across validation schemes")
-if model_perf is not None:
-    md.append(model_perf.round(4).to_markdown(index=False))
-    md.append("")
-
-md.append("## Leave-one-region-out — logistic regression")
-if lr_loo is not None:
-    md.append(lr_loo.round(4).to_markdown(index=False))
-    md.append("")
-
-md.append("## Bootstrap CIs by region (LR)")
-if boot_cis is not None:
-    md.append(boot_cis.round(4).to_markdown(index=False))
-    md.append("")
-
-md.append("## Baselines")
-if baselines is not None:
-    md.append(baselines.round(4).to_markdown(index=False))
-    md.append("")
-
-md.append("## Feature matrix summary")
-if feature_summ is not None:
-    md.append(feature_summ.to_markdown(index=False))
-    md.append("")
-
-md.append("## Single-source submission effect")
-if singlesource is not None:
-    md.append(singlesource.to_markdown(index=False))
-    md.append("")
-
-md.append("## Key statistics for the abstract")
-md.append(f"- Random CV AUROC (LR):  "
-          f"{model_results.get('logistic_regression__random', {}).get('auroc_mean', 'NA')}")
-md.append(f"- Random CV AUROC (XGB): "
-          f"{model_results.get('xgboost__random', {}).get('auroc_mean', 'NA')}")
-md.append(f"- MLST CV AUROC (LR):    "
-          f"{model_results.get('logistic_regression__mlst', {}).get('auroc_mean', 'NA')}")
-md.append(f"- MLST CV AUROC (XGB):   "
-          f"{model_results.get('xgboost__mlst', {}).get('auroc_mean', 'NA')}")
-
-md_path = setup.RESULTS / "MANUSCRIPT_NUMBERS.md"
-md_path.write_text("\n".join(md), encoding="utf-8")
-log.info(f"Saved: {md_path.relative_to(setup.ROOT)}")
-
-(setup.RESULTS / "MANUSCRIPT_NUMBERS.json").write_text(
-    json.dumps({
-        "cohort": {"verified": len(full), "annotated": len(primary),
-                   "african_test": len(africa), "features": len(feat_cols)},
-        "model_results": model_results,
-    }, indent=2, default=str), encoding="utf-8")
-log.info("Saved: results/MANUSCRIPT_NUMBERS.json")
-
-setup.write_result("19_consolidate_results", {
-    "analysis_name":    "manuscript_consolidation",
-    "cohort_size":      int(len(full)),
-    "annotated":        int(len(primary)),
-    "african_test":     int(len(africa)),
-    "n_features":       int(len(feat_cols)),
-    "timestamp":        datetime.now(timezone.utc).isoformat(),
-    "software_version": setup.software_versions(),
-})
-log.info("Done.")
+log = S.get_logger("19_consolidate_results")
+R = S.RESULTS; res = json.load(open(R / "08_model_results.json"))
+tabs = {n: pd.read_csv(R / f"{n}.csv") for n in ["table1_overall", "table1_by_region", "table2_filter_cascade", "table3_region_distribution",
+    "table4_validation_schemes", "table5_temporal_holdout", "table6_region_holdout", "table7_features_logreg",
+    "tableS1_single_source_effect", "tableS2_feature_matrix_summary", "tableS3_baselines", "tableS3b_carbapenemase_rule_by_region",
+    "tableS4_bootstrap_cis", "tableS5_loo_region_sensitivity", "tableS6_generalisation_gap", "tableS7_error_analysis_by_carbapenemase",
+    "tableS8_top_sequence_types_shifted_regions", "tableS9_leave_one_centre_out", "tableS10_learning_curve_local_data", "tableS11_recalibration"]}
+for t in tabs.values():
+    for c in t.columns:
+        if str(t[c].dtype) == "object": t[c] = t[c].astype(object).where(t[c].notna(), "Not recorded") if c.lower() in ("region", "largest named centre", "centre") else t[c]
+nums = {"versions": S.software_versions(),
+    "cohort": {"verified": int(tabs["table3_region_distribution"].Verified_n.sum()), "annotated": int(tabs["table3_region_distribution"].Annotated_n.sum()), "features": S.N_FEATURES_EXPECTED},
+    "random": {m: {k: res[f"{m}__random"][k] for k in ["auroc", "auroc_sd", "auprc", "accuracy", "f1"]} for m in S.MODELS},
+    "mlst": {m: {k: res[f"{m}__mlst"][k] for k in ["auroc", "auroc_sd", "auprc", "accuracy", "f1"]} for m in S.MODELS},
+    "temporal": {m: {k: res[f"{m}__temporal"][k] for k in ["auroc", "auprc", "n_train", "n_test", "n_excluded_missing_year"]} for m in S.MODELS},
+    "loro": {m: {r: {k: v.get(k) for k in ["auroc", "n", "prevalence"]} for r, v in res[f"{m}__loro"].items()} for m in S.MODELS}}
+json.dump(nums, open(R / "MANUSCRIPT_NUMBERS.json", "w"), indent=2, default=str)
+with open(R / "MANUSCRIPT_NUMBERS.md", "w", encoding="utf-8") as fh:
+    fh.write("# Manuscript numbers (generated, do not edit by hand)\n\n")
+    for n, t in tabs.items():
+        fh.write(f"## {n}\n\n{t.to_markdown(index=False) if hasattr(t, 'to_markdown') else t.to_string(index=False)}\n\n")
+try:
+    with pd.ExcelWriter(R / "supplementary_tables.xlsx") as xw:
+        for n, t in tabs.items():
+            if n.startswith("tableS"): t.to_excel(xw, sheet_name=n[5:30], index=False)
+except ImportError:
+    log.info("openpyxl missing; workbook skipped")
+S.write_result("19_consolidate_results", {"files": list(tabs)}); log.info("Consolidated %d tables" % len(tabs))

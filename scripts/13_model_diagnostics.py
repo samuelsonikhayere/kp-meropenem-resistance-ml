@@ -1,246 +1,49 @@
-"""
-13_model_diagnostics.py — Calibration, decision curve, confusion matrices.
+"""13: Figures 5, 7 and S2 from the pooled out-of-fold predictions (ROC, precision-recall, calibration, decision curve, regional calibration shift, confusion matrix)."""
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent))
+from fig_style import *
+from sklearn.metrics import roc_curve, precision_recall_curve, confusion_matrix
 
-For the primary model (logistic regression), evaluated on:
-  - Random 5-fold CV
-  - Africa holdout
-
-Produces figures for the supplementary and the primary manuscript.
-"""
-
-from __future__ import annotations
-import json
-from datetime import datetime, timezone
-from importlib.machinery import SourceFileLoader
-from pathlib import Path as _P
-
-import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
-from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import StratifiedKFold
-from sklearn.calibration import calibration_curve
-from sklearn.metrics import (roc_curve, precision_recall_curve,
-                             confusion_matrix, roc_auc_score,
-                             average_precision_score)
-
-setup = SourceFileLoader("setup", str(_P(__file__).parent / "00_setup.py")).load_module()
-log = setup.get_logger("13_model_diagnostics")
-
-RANDOM_SEED = setup.RANDOM_SEED
-LR_PARAMS   = dict(max_iter=5000, C=1.0, solver="lbfgs", random_state=RANDOM_SEED)
-
-# Publication-style plot settings
-plt.rcParams.update({
-    "font.family":     "DejaVu Sans",
-    "font.size":       9,
-    "axes.labelsize":  9,
-    "axes.titlesize":  10,
-    "axes.spines.top":  False,
-    "axes.spines.right": False,
-    "figure.dpi":       150,
-})
-
-# ─────────────────────────────────────────────────────────────────────────
-# Load
-# ─────────────────────────────────────────────────────────────────────────
-table = pd.read_csv(setup.PROCESSED / "06_analysis_table.csv",
-                    low_memory=False, dtype={"genome_id": str})
-
-META = {"genome_id", "label", "region", "region_sensitivity",
-        "isolation_country", "sequencing_center", "mlst",
-        "genome_quality", "collection_year", "method_tier", "has_annotation"}
-features = [c for c in table.columns if c not in META]
-X = table[features].values.astype("float32")
-y = table["label"].values.astype(int)
-regions = table["region"].values
-
-
-# ─────────────────────────────────────────────────────────────────────────
-# 1. Random CV — pooled predictions
-# ─────────────────────────────────────────────────────────────────────────
-log.info("Random 5-fold CV — pooling test predictions...")
-skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=RANDOM_SEED)
-p_random = np.zeros(len(y))
-for tr, te in skf.split(X, y):
-    m = LogisticRegression(**LR_PARAMS)
-    m.fit(X[tr], y[tr])
-    p_random[te] = m.predict_proba(X[te])[:, 1]
-
-# ─────────────────────────────────────────────────────────────────────────
-# 2. Africa holdout — train on non-Africa, test on Africa
-# ─────────────────────────────────────────────────────────────────────────
-log.info("Africa holdout...")
-africa_mask = regions == "Africa"
-X_train_afr, y_train_afr = X[~africa_mask], y[~africa_mask]
-X_test_afr,  y_test_afr  = X[africa_mask],  y[africa_mask]
-
-m_afr = LogisticRegression(**LR_PARAMS)
-m_afr.fit(X_train_afr, y_train_afr)
-p_africa = m_afr.predict_proba(X_test_afr)[:, 1]
-
-log.info(f"  Africa holdout AUROC: {roc_auc_score(y_test_afr, p_africa):.3f}")
-
-
-# ─────────────────────────────────────────────────────────────────────────
-# Figure 1 — ROC curves (random CV pooled + Africa holdout)
-# ─────────────────────────────────────────────────────────────────────────
-fig, ax = plt.subplots(figsize=(4.5, 4.5))
-
-fpr, tpr, _ = roc_curve(y, p_random)
-auc_r = roc_auc_score(y, p_random)
-ax.plot(fpr, tpr, color="tab:blue", lw=1.8,
-        label=f"Random 5-fold CV (pooled, AUROC={auc_r:.3f})")
-
-if len(np.unique(y_test_afr)) > 1:
-    fpr_a, tpr_a, _ = roc_curve(y_test_afr, p_africa)
-    auc_a = roc_auc_score(y_test_afr, p_africa)
-    ax.plot(fpr_a, tpr_a, color="tab:red", lw=1.8,
-            label=f"Africa holdout (AUROC={auc_a:.3f})")
-
-ax.plot([0, 1], [0, 1], "k--", lw=0.8, label="Chance")
-ax.set_xlabel("False positive rate (1 − specificity)")
-ax.set_ylabel("True positive rate (sensitivity)")
-ax.set_title("ROC — meropenem resistance")
-ax.legend(loc="lower right", fontsize=8, frameon=False)
-fig.tight_layout()
-fig.savefig(setup.FIGURES / "figure_roc.pdf")
-fig.savefig(setup.FIGURES / "figure_roc.png")
-plt.close(fig)
-log.info("Saved: figures/figure_roc.pdf / .png")
-
-
-# ─────────────────────────────────────────────────────────────────────────
-# Figure 2 — Precision-recall curves
-# ─────────────────────────────────────────────────────────────────────────
-fig, ax = plt.subplots(figsize=(4.5, 4.5))
-
-prec, rec, _ = precision_recall_curve(y, p_random)
-ap_r = average_precision_score(y, p_random)
-ax.plot(rec, prec, color="tab:blue", lw=1.8,
-        label=f"Random 5-fold CV (pooled, AUPRC={ap_r:.3f})")
-
-if len(np.unique(y_test_afr)) > 1:
-    prec_a, rec_a, _ = precision_recall_curve(y_test_afr, p_africa)
-    ap_a = average_precision_score(y_test_afr, p_africa)
-    ax.plot(rec_a, prec_a, color="tab:red", lw=1.8,
-            label=f"Africa holdout (AUPRC={ap_a:.3f})")
-
-ax.axhline(y.mean(), color="grey", linestyle="--", lw=0.8,
-           label=f"Baseline prevalence ({y.mean():.2f})")
-ax.set_xlabel("Recall")
-ax.set_ylabel("Precision")
-ax.set_title("Precision-recall — meropenem resistance")
-ax.legend(loc="best", fontsize=8, frameon=False)
-fig.tight_layout()
-fig.savefig(setup.FIGURES / "figure_pr.pdf")
-fig.savefig(setup.FIGURES / "figure_pr.png")
-plt.close(fig)
-log.info("Saved: figures/figure_pr.pdf / .png")
-
-
-# ─────────────────────────────────────────────────────────────────────────
-# Figure 3 — Calibration plot (random CV pooled + Africa holdout)
-# ─────────────────────────────────────────────────────────────────────────
-fig, ax = plt.subplots(figsize=(4.5, 4.5))
-
-frac_pos, mean_pred = calibration_curve(y, p_random, n_bins=10, strategy="quantile")
-ax.plot(mean_pred, frac_pos, marker="o", color="tab:blue", lw=1.5,
-        markersize=4, label="Random 5-fold CV (pooled)")
-
-if len(np.unique(y_test_afr)) > 1:
-    try:
-        frac_a, mean_a = calibration_curve(y_test_afr, p_africa,
-                                           n_bins=5, strategy="quantile")
-        ax.plot(mean_a, frac_a, marker="s", color="tab:red", lw=1.5,
-                markersize=4, label="Africa holdout")
-    except ValueError:
-        pass
-
-ax.plot([0, 1], [0, 1], "k--", lw=0.8, label="Perfect calibration")
-ax.set_xlabel("Predicted probability")
-ax.set_ylabel("Observed fraction resistant")
-ax.set_title("Calibration — meropenem resistance")
-ax.legend(loc="best", fontsize=8, frameon=False)
-fig.tight_layout()
-fig.savefig(setup.FIGURES / "figure_calibration.pdf")
-fig.savefig(setup.FIGURES / "figure_calibration.png")
-plt.close(fig)
-log.info("Saved: figures/figure_calibration.pdf / .png")
-
-
-# ─────────────────────────────────────────────────────────────────────────
-# Figure 4 — Decision curve analysis (random CV)
-# ─────────────────────────────────────────────────────────────────────────
-def net_benefit(y_true, y_prob, thresholds):
-    N = len(y_true)
-    nb = []
-    for t in thresholds:
-        pred = y_prob >= t
-        tp = ((pred == 1) & (y_true == 1)).sum()
-        fp = ((pred == 1) & (y_true == 0)).sum()
-        nb.append((tp / N) - (fp / N) * (t / (1 - t)))
-    return np.array(nb)
-
-
-thresholds = np.linspace(0.01, 0.99, 99)
-nb_model = net_benefit(y, p_random, thresholds)
-nb_all   = net_benefit(y, np.ones_like(p_random), thresholds)
-prevalence = y.mean()
-
-fig, ax = plt.subplots(figsize=(4.5, 4.5))
-ax.plot(thresholds, nb_model, color="tab:blue", lw=1.8, label="Model")
-ax.plot(thresholds, nb_all, color="grey", lw=1.0, linestyle="--",
-        label="Treat all")
-ax.axhline(0, color="black", lw=0.8, linestyle=":",
-           label="Treat none")
-ax.axvline(prevalence, color="grey", lw=0.6, linestyle=":",
-           label=f"Prevalence = {prevalence:.2f}")
-ax.set_xlabel("Threshold probability")
-ax.set_ylabel("Net benefit")
-ax.set_title("Decision curve — meropenem resistance")
-ax.legend(loc="best", fontsize=8, frameon=False)
-fig.tight_layout()
-fig.savefig(setup.FIGURES / "figure_dca.pdf")
-fig.savefig(setup.FIGURES / "figure_dca.png")
-plt.close(fig)
-log.info("Saved: figures/figure_dca.pdf / .png")
-
-
-# ─────────────────────────────────────────────────────────────────────────
-# Figure 5 — Confusion matrix (threshold 0.5) for random CV pooled
-# ─────────────────────────────────────────────────────────────────────────
-cm = confusion_matrix(y, (p_random >= 0.5).astype(int))
-fig, ax = plt.subplots(figsize=(4, 4))
-im = ax.imshow(cm, cmap="Blues", aspect="equal")
+oof = pd.read_csv(S.RESULTS / "oof_predictions.csv"); y = oof.label.values; df = S.load_table(); f = S.feature_columns(df)
+X = df[f].values; ci = [f.index(c) for c in S.carbapenemase_columns(f)]; rule = (X[:, ci].sum(1) > 0).astype(int)
+sens = rule[y == 1].mean(); spec = 1 - rule[y == 0].mean()
+# Figure 5
+fig, (a, b) = plt.subplots(1, 2, figsize=(7.2, 3.5))
+for m in S.MODELS:
+    p = oof[f"{m}__random"].values; fpr, tpr, _ = roc_curve(y, p); pr, rc, _ = precision_recall_curve(y, p)
+    a.plot(fpr, tpr, color=MODEL_COL[m], lw=1.6, label=f"{MODEL_LABEL[m]} (AUROC {S.compute_metrics(y, p)['auroc']:.3f})")
+    b.plot(rc, pr, color=MODEL_COL[m], lw=1.6, label=f"{MODEL_LABEL[m]} (AUPRC {S.compute_metrics(y, p)['auprc']:.3f})")
+a.plot([0, 1], [0, 1], color="#999", ls=":", lw=1); a.plot(1 - spec, sens, "s", color=C["rule"], ms=5, label="Carbapenemase rule")
+b.axhline(y.mean(), color="#999", ls=":", lw=1); b.plot(sens, rule[y == 1].sum() / rule.sum(), "s", color=C["rule"], ms=5, label="Carbapenemase rule")
+a.set_xlabel("False positive rate"); a.set_ylabel("True positive rate"); b.set_xlabel("Recall"); b.set_ylabel("Precision"); b.set_ylim(.4, 1.02)
+for ax, L in zip((a, b), "AB"): ax.legend(frameon=False, loc="lower right" if L == "A" else "lower left", fontsize=7.5); letter(ax, L)
+fig.tight_layout(); save(fig, "Figure5_roc_pr")
+# Figure 7
+fig, axs = plt.subplots(1, 3, figsize=(10.2, 3.5)); a, b, c = axs
+a.plot([0, 1], [0, 1], color="#999", ls=":", lw=1)
+for m in S.MODELS:
+    p = oof[f"{m}__random"].values; q = pd.qcut(p, 10, duplicates="drop"); g = pd.DataFrame({"p": p, "y": y}).groupby(q, observed=True).mean()
+    a.plot(g.p, g.y, "o-", color=MODEL_COL[m], ms=4, lw=1.2, label=MODEL_LABEL[m])
+a.set_xlabel("Mean predicted probability"); a.set_ylabel("Observed fraction resistant"); a.legend(frameon=False, loc="upper left")
+th = np.linspace(.01, .99, 99); nb = lambda yt, pr_, t_: (((pr_ >= t_) & (yt == 1)).sum() - ((pr_ >= t_) & (yt == 0)).sum() * t_ / (1 - t_)) / len(yt)
+for m in S.MODELS: b.plot(th, [nb(y, oof[f"{m}__random"].values, t_) for t_ in th], color=MODEL_COL[m], lw=1.5, label=MODEL_LABEL[m])
+b.plot(th, [y.mean() - (1 - y.mean()) * t_ / (1 - t_) for t_ in th], color="#777", ls="--", lw=1.1, label="Treat all"); b.axhline(0, color="k", lw=.8, label="Treat none")
+b.set_ylim(-.1, .45); b.set_xlim(0, 1); b.set_xlabel("Threshold probability"); b.set_ylabel("Net benefit"); b.legend(frameon=False, fontsize=7.5, ncol=2, loc="lower center", bbox_to_anchor=(.5, 1.0))
+e = pd.read_csv(S.RESULTS / "tableS11_recalibration.csv").iloc[::-1].reset_index(drop=True)
+for i, r in e.iterrows():
+    c.plot([r["Observed prevalence"], r["Mean predicted risk"]], [i, i], color="#BBB", lw=1.2, zorder=1)
+c.scatter(e["Observed prevalence"], range(len(e)), color="k", s=22, zorder=3, label="Observed"); c.scatter(e["Mean predicted risk"], range(len(e)), color=C["lr"], s=22, zorder=3, label="Predicted (held-out)")
+c.set_yticks(range(len(e))); c.set_yticklabels(e.Region, fontsize=7.5); c.set_xlabel("Resistance prevalence"); c.set_xlim(0, 1); c.legend(frameon=False, loc="lower center", bbox_to_anchor=(.4, 1.0), ncol=2, fontsize=7.5)
+for ax, L in zip(axs, "ABC"): letter(ax, L, -.2 if L != "C" else -.4)
+fig.tight_layout(); save(fig, "Figure7_calibration_dca")
+# Figure S2
+cm = confusion_matrix(y, (oof["logistic_regression__random"] >= .5).astype(int)); fig, ax = plt.subplots(figsize=(3.6, 3.2))
+ax.imshow(cm, cmap="Blues")
 for i in range(2):
-    for j in range(2):
-        ax.text(j, i, str(cm[i, j]), ha="center", va="center",
-                color="white" if cm[i, j] > cm.max() / 2 else "black",
-                fontsize=11)
-ax.set_xticks([0, 1]); ax.set_xticklabels(["Pred S", "Pred R"])
-ax.set_yticks([0, 1]); ax.set_yticklabels(["True S", "True R"])
-ax.set_title("Confusion matrix (threshold 0.5, random CV pooled)")
-fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-fig.tight_layout()
-fig.savefig(setup.FIGURES / "figure_confusion.pdf")
-fig.savefig(setup.FIGURES / "figure_confusion.png")
-plt.close(fig)
-log.info("Saved: figures/figure_confusion.pdf / .png")
-
-
-# ─────────────────────────────────────────────────────────────────────────
-# Provenance
-# ─────────────────────────────────────────────────────────────────────────
-setup.write_result("13_model_diagnostics", {
-    "analysis_name":     "model_diagnostics",
-    "dataset_version":   "api_v1",
-    "n":                 int(len(y)),
-    "auroc_random_pooled": float(auc_r),
-    "auroc_africa_holdout": float(roc_auc_score(y_test_afr, p_africa))
-                              if len(np.unique(y_test_afr)) > 1 else None,
-    "confusion_matrix_random": cm.tolist(),
-    "timestamp":         datetime.now(timezone.utc).isoformat(),
-    "software_version":  setup.software_versions(),
-})
-log.info("Done.")
+    for j in range(2): ax.text(j, i, f"{cm[i, j]:,}", ha="center", va="center", fontsize=11, color="white" if cm[i, j] > cm.max() / 2 else "black")
+ax.set_xticks([0, 1]); ax.set_xticklabels(["Susceptible", "Resistant"]); ax.set_yticks([0, 1]); ax.set_yticklabels(["Susceptible", "Resistant"])
+ax.set_xlabel("Predicted"); ax.set_ylabel("Observed"); [s.set_visible(True) for s in ax.spines.values()]
+fig.tight_layout(); save(fig, "FigureS2_confusion_matrix")
+tn, fp, fn, tp = cm.ravel(); S.write_result("13_model_diagnostics", {"confusion_LR_random_0.5": dict(tn=int(tn), fp=int(fp), fn=int(fn), tp=int(tp), sensitivity=tp / (tp + fn), specificity=tn / (tn + fp)),
+    "carbapenemase_rule": dict(sensitivity=float(sens), specificity=float(spec))})

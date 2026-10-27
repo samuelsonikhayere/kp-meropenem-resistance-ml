@@ -1,77 +1,25 @@
-"""
-15_validation_figure.py — Figure 3: validation performance across schemes.
+"""15: Figure 3, discrimination under the three CV-style schemes (bootstrap 95% CIs from table S4)."""
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent))
+from fig_style import *
+from sklearn.metrics import roc_curve, precision_recall_curve, confusion_matrix
 
-Three separate panels (one per validation question):
-  A. Random 5-fold     — IID-like performance
-  B. MLST GroupKFold   — lineage-independent performance
-  C. Temporal ≥2016    — temporal generalisation
-
-Each panel shows LR and XGBoost side by side.
-"""
-
-from __future__ import annotations
-import json
-from importlib.machinery import SourceFileLoader
-from pathlib import Path as _P
-
-import numpy as np
-import matplotlib.pyplot as plt
-
-setup = SourceFileLoader("setup", str(_P(__file__).parent / "00_setup.py")).load_module()
-log = setup.get_logger("15_validation_figure")
-
-results = json.loads((setup.RESULTS / "08_model_results.json").read_text(encoding="utf-8"))
-
-def get(model, scheme):
-    return results.get(f"{model}__{scheme}", {})
-
-panels = [
-    ("Random 5-fold CV",         "IID-like performance",             "random"),
-    ("MLST GroupKFold",          "Lineage-independent performance",  "mlst"),
-    ("Temporal holdout ≥2016",   "Temporal generalisation",          "temporal"),
-]
-
-fig, axes = plt.subplots(1, 3, figsize=(10, 3.6), sharey=True)
-colors = {"logistic_regression": "#3b6fb5", "xgboost": "#c1573b"}
-labels = {"logistic_regression": "Logistic regression", "xgboost": "XGBoost"}
-
-for ax, (title, subtitle, scheme) in zip(axes, panels):
-    aurocs, sds, names = [], [], []
-    for model in ("logistic_regression", "xgboost"):
-        r = get(model, scheme)
-        if not r:
-            continue
-        if scheme == "temporal":
-            aurocs.append(r.get("auroc", np.nan))
-            sds.append(0)
-        else:
-            aurocs.append(r.get("auroc_mean", np.nan))
-            sds.append(r.get("auroc_sd", 0))
-        names.append(model)
-
-    x = np.arange(len(names))
-    bars = ax.bar(x, aurocs, yerr=sds, capsize=4,
-                  color=[colors[n] for n in names],
-                  edgecolor="#333", linewidth=0.6, width=0.6)
-
-    for bar, a in zip(bars, aurocs):
-        ax.text(bar.get_x() + bar.get_width()/2, a + 0.02,
-                f"{a:.3f}", ha="center", va="bottom", fontsize=8.5)
-
-    ax.set_xticks(x)
-    ax.set_xticklabels([labels[n] for n in names], fontsize=8.5)
-    ax.set_title(f"{title}\n{subtitle}", fontsize=9)
-    ax.set_ylim(0.5, 1.02)
-    ax.axhline(0.5, color="grey", linestyle=":", linewidth=0.6)
-    ax.grid(axis="y", linestyle=":", linewidth=0.5, alpha=0.5)
-    ax.set_axisbelow(True)
-
-axes[0].set_ylabel("AUROC")
-
-fig.suptitle("Model performance across three validation questions",
-             fontsize=10.5, fontweight="bold", y=1.02)
-fig.tight_layout()
-fig.savefig(setup.FIGURES / "figure3_validation_schemes.pdf", bbox_inches="tight")
-fig.savefig(setup.FIGURES / "figure3_validation_schemes.png", bbox_inches="tight", dpi=300)
-plt.close(fig)
-log.info("Saved: figures/figure3_validation_schemes.pdf / .png")
+ci = pd.read_csv(S.RESULTS / "tableS4_bootstrap_cis.csv"); t4 = pd.read_csv(S.RESULTS / "table4_validation_schemes.csv")
+schemes = ["Random 5-fold", "MLST-grouped 5-fold", "Temporal holdout"]; lab = ["Random\n5-fold", "Lineage (MLST)\ngrouped", "Temporal\nholdout"]
+fig, axs = plt.subplots(1, 2, figsize=(7.2, 3.4))
+for ax, key, L in zip(axs, ["AUROC", "AUPRC"], "AB"):
+    for j, m in enumerate(S.MODELS):
+        for i, sc in enumerate(schemes):
+            x = i + (j - .5) * .28
+            if key == "AUROC":
+                nm = {"Random 5-fold": "Random stratified 5-fold", "MLST-grouped 5-fold": "MLST-grouped 5-fold", "Temporal holdout": "Temporal (train <2016, test 2016 onward)"}[sc]
+                r = t4[(t4.Model == m) & (t4.Scheme == nm)].iloc[0]; sd = r["AUROC fold SD"]; sd = 0 if pd.isna(sd) else sd
+                ax.errorbar(x, r["AUROC (mean of folds)"], yerr=sd, fmt="o", color=MODEL_COL[m], capsize=3 if sd else 0, ms=5, lw=1.2, label=MODEL_LABEL[m] if i == 0 else None)
+            else:
+                nm = {"Random 5-fold": "Random stratified 5-fold", "MLST-grouped 5-fold": "MLST-grouped 5-fold", "Temporal holdout": "Temporal (train <2016, test 2016 onward)"}[sc]
+                r = t4[(t4.Model == m) & (t4.Scheme == nm)].iloc[0]; sd = r["AUPRC fold SD"]; sd = 0 if pd.isna(sd) else sd
+                ax.errorbar(x, r["AUPRC (mean of folds)"], yerr=sd, fmt="o", color=MODEL_COL[m], capsize=3 if sd else 0, ms=5, lw=1.2, label=MODEL_LABEL[m] if i == 0 else None)
+    ax.set_xticks(range(3)); ax.set_xticklabels(lab); ax.set_ylabel(key); ax.set_xlim(-.6, 2.6); ax.set_ylim(.88, 1.0); ax.grid(axis="y", color="#E5E5E5", lw=.6); letter(ax, L)
+axs[0].legend(frameon=False, loc="lower left")
+fig.tight_layout(); save(fig, "Figure3_validation_schemes")

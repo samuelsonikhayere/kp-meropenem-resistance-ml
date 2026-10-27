@@ -1,55 +1,15 @@
-"""
-18_pca_mlst_figure.py — Supplementary figure: PCA by MLST lineage.
-
-Confirms feature-space structure supports the MLST-grouped CV design.
-"""
-
-from __future__ import annotations
-from importlib.machinery import SourceFileLoader
-from pathlib import Path as _P
-
-import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
-from sklearn.decomposition import PCA
-
-setup = SourceFileLoader("setup", str(_P(__file__).parent / "00_setup.py")).load_module()
-log = setup.get_logger("18_pca_mlst_figure")
-
-table = pd.read_csv(setup.PROCESSED / "06_analysis_table.csv",
-                    low_memory=False, dtype={"genome_id": str})
-
-assert len(table) == 3694, f"Expected 3694 annotated, got {len(table)}"
-
-feat_cols = setup.feature_columns(table)
-X = table[feat_cols].values.astype("float32")
-mlst = table["mlst"].fillna("UNKNOWN").astype(str)
-
-pca = PCA(n_components=2, random_state=setup.RANDOM_SEED)
-X_2d = pca.fit_transform(X)
-
-top_mlst = mlst.value_counts().head(10).index.tolist()
-colors = plt.cm.tab10(np.linspace(0, 1, len(top_mlst)))
-
-fig, ax = plt.subplots(figsize=(7.2, 5.6))
-
-mask_other = ~mlst.isin(top_mlst)
-ax.scatter(X_2d[mask_other, 0], X_2d[mask_other, 1],
-           c="#d9d9d9", s=8, alpha=0.5, edgecolors="none",
-           label=f"Other MLST ({int(mask_other.sum())})")
-
-for i, m in enumerate(top_mlst):
-    mask = mlst == m
-    ax.scatter(X_2d[mask, 0], X_2d[mask, 1],
-               c=[colors[i]], s=18, alpha=0.85, edgecolors="none",
-               label=f"{m} (n={int(mask.sum())})")
-
-ax.set_xlabel(f"PC1 ({pca.explained_variance_ratio_[0]:.1%})")
-ax.set_ylabel(f"PC2 ({pca.explained_variance_ratio_[1]:.1%})")
-ax.set_title("Feature space structure by MLST lineage", fontsize=10)
-ax.legend(loc="best", fontsize=7, frameon=False, ncol=2)
-fig.tight_layout()
-fig.savefig(setup.FIGURES / "figureS_pca_mlst.pdf", bbox_inches="tight")
-fig.savefig(setup.FIGURES / "figureS_pca_mlst.png", bbox_inches="tight", dpi=300)
-plt.close(fig)
-log.info("Saved: figures/figureS_pca_mlst.pdf / .png")
+"""18: Figure S1, the same PCA coloured by the eight most common sequence types."""
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent))
+from fig_style import *
+df, sc = pca_scores(); st = df.mlst.fillna("Not recorded").astype(str).str.replace("MLST.klebsiella.", "ST", regex=False)
+top = st[st != "Not recorded"].value_counts().head(8).index.tolist()
+pal = ["#0072B2", "#E69F00", "#009E73", "#CC79A7", "#D55E00", "#56B4E9", "#F0E442", "#000000"]
+fig, ax = plt.subplots(figsize=(6.2, 4.6))
+o = ~st.isin(top).values; ax.scatter(sc.PC1[o], sc.PC2[o], s=7, c="#D0D0D0", edgecolors="none", label=f"Other (n = {o.sum():,})")
+for t, c in zip(top, pal):
+    m = (st == t).values; ax.scatter(sc.PC1[m], sc.PC2[m], s=10, c=c, alpha=.8, edgecolors="none", label=f"{t} (n = {m.sum():,})")
+ax.set_xlabel(f"PC1 ({100 * sc.var1[0]:.1f}% of variance)"); ax.set_ylabel(f"PC2 ({100 * sc.var2[0]:.1f}% of variance)")
+ax.legend(frameon=False, loc="center left", bbox_to_anchor=(1.01, .5), markerscale=1.8)
+save(fig, "FigureS1_pca_mlst")

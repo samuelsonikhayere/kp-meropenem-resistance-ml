@@ -1,130 +1,41 @@
-"""
-14_study_flow_figure.py — Figure 1: cohort selection and analysis flow diagram.
-
-Reads numbers from results/table2_filter_cascade.csv and processed/06_analysis_table.csv.
-Renders a box-and-arrow study flow diagram (not CONSORT).
-"""
-
-from __future__ import annotations
-from importlib.machinery import SourceFileLoader
-from pathlib import Path as _P
-
-import pandas as pd
-import matplotlib.pyplot as plt
-from matplotlib.patches import FancyBboxPatch, FancyArrowPatch
-
-setup = SourceFileLoader("setup", str(_P(__file__).parent / "00_setup.py")).load_module()
-log = setup.get_logger("14_study_flow_figure")
-
-# ── Load numbers ─────────────────────────────────────────────────────────
-cascade = pd.read_csv(setup.RESULTS / "table2_filter_cascade.csv")
-
-def val(stage_substr):
-    row = cascade[cascade["stage"].str.contains(stage_substr, na=False)]
-    return int(row.iloc[0]["records"]) if len(row) and pd.notna(row.iloc[0]["records"]) else None
-
-def uniq(stage_substr):
-    row = cascade[cascade["stage"].str.contains(stage_substr, na=False)]
-    return int(row.iloc[0]["unique_genomes"]) if len(row) and pd.notna(row.iloc[0]["unique_genomes"]) else None
-
-primary = pd.read_csv(setup.PROCESSED / "06_analysis_table.csv", low_memory=False)
-full    = pd.read_csv(setup.PROCESSED / "06_analysis_table_full.csv", low_memory=False)
-
-n_amr_records     = val("Raw meropenem AMR records")
-n_after_merge     = val("After inner merge")
-n_after_phenotype = val("After dropping missing phenotype")
-n_after_binary    = val("After keeping only R/S")
-n_after_verified  = val("After verified-method filter")
-n_after_dedup     = val("After evidence-hierarchy")
-n_annotated       = len(primary)
-n_full_cohort     = len(full)
-n_no_annotation   = n_full_cohort - n_annotated
-n_features        = len(setup.feature_columns(primary))
-
-log.info(f"Flow numbers: AMR={n_amr_records}, merged={n_after_merge}, "
-         f"phenotype={n_after_phenotype}, binary={n_after_binary}, "
-         f"verified={n_after_verified}, dedup={n_after_dedup}, "
-         f"annotated={n_annotated}, full={n_full_cohort}, feats={n_features}")
-
-# Assert expected numbers
-assert n_full_cohort == 3930, f"Expected 3930 verified cohort, got {n_full_cohort}"
-assert n_annotated == 3694,   f"Expected 3694 annotated, got {n_annotated}"
-
-# ── Draw figure ──────────────────────────────────────────────────────────
-plt.rcParams.update({
-    "font.family": "DejaVu Sans", "font.size": 9,
-    "figure.dpi": 300,
-})
-
-fig, ax = plt.subplots(figsize=(7.5, 9))
-ax.set_xlim(0, 10); ax.set_ylim(0, 15); ax.axis("off")
-
-steps = [
-    ("Raw BV-BRC meropenem AMR records",
-     f"n = {n_amr_records:,}", "#eef4fb"),
-    ("Genome metadata merged on genome_id",
-     f"n = {n_after_merge:,} records; "
-     f"{uniq('After inner merge') or ''} unique genome IDs", "#eef4fb"),
-    ("Missing phenotype excluded",
-     f"n = {n_after_phenotype:,} records", "#f6f9fd"),
-    ("Intermediate / SDD phenotypes excluded",
-     f"n = {n_after_binary:,} records", "#f6f9fd"),
-    ("Verified laboratory typing method required",
-     f"n = {n_after_verified:,} records", "#f6f9fd"),
-    ("Evidence-hierarchy deduplication (one row per genome)",
-     f"n = {n_after_dedup:,} verified isolates", "#eaf5ea"),
-    ("Verified cohort (analysis denominator)",
-     f"n = {n_full_cohort:,} isolates\n"
-     f"1,579 resistant / 2,351 susceptible", "#eaf5ea"),
-    ("Annotated feature matrix (primary modelling cohort)",
-     f"n = {n_annotated:,} isolates × {n_features} AMR products\n"
-     f"{n_no_annotation} verified isolates excluded (no AMR annotation)", "#fdf2e6"),
-]
-
-y_positions = [14.2, 12.6, 11.3, 10.2, 9.1, 8.0, 6.5, 4.6]
-box_w, box_h = 7.0, 1.1
-x_center = 5
-
-for (title, sub, col), y in zip(steps, y_positions):
-    box = FancyBboxPatch(
-        (x_center - box_w/2, y - box_h/2), box_w, box_h,
-        boxstyle="round,pad=0.05,rounding_size=0.15",
-        linewidth=0.8, edgecolor="#333", facecolor=col)
-    ax.add_patch(box)
-    ax.text(x_center, y + 0.20, title, ha="center", va="center",
-            fontsize=9.5, fontweight="bold")
-    ax.text(x_center, y - 0.25, sub, ha="center", va="center",
-            fontsize=8.5, color="#333")
-
-for y_top, y_bot in zip(y_positions[:-1], y_positions[1:]):
-    arrow = FancyArrowPatch(
-        (x_center, y_top - box_h/2 - 0.02),
-        (x_center, y_bot + box_h/2 + 0.02),
-        arrowstyle="-|>", mutation_scale=12,
-        linewidth=0.9, color="#333")
-    ax.add_patch(arrow)
-
-ax.text(x_center, 3.3, "Primary analyses (Batch 3)", ha="center",
-        fontsize=9.5, fontweight="bold")
-
-analysis_items = [
-    "Random 5-fold cross-validation",
-    "MLST-grouped 5-fold cross-validation",
-    "Leave-one-region-out validation (7 regions)",
-    "Temporal holdout: train <2016, test ≥2016",
-    "2,000-iteration bootstrap CIs per region",
-    "Baselines: majority class, annotation availability,\n"
-    "            11 batch-marker products",
-]
-for i, txt in enumerate(analysis_items):
-    ax.text(x_center, 2.8 - i * 0.35, f"•  {txt}",
-            ha="left", va="top", fontsize=8.5, color="#222",
-            family="DejaVu Sans")
-
-fig.suptitle("Study cohort selection and analysis flow",
-             fontsize=11, fontweight="bold", y=0.98)
-fig.tight_layout()
-fig.savefig(setup.FIGURES / "figure1_study_flow.pdf", bbox_inches="tight")
-fig.savefig(setup.FIGURES / "figure1_study_flow.png", bbox_inches="tight", dpi=300)
-plt.close(fig)
-log.info("Saved: figures/figure1_study_flow.pdf / .png")
+"""14: Figure 1, cohort selection and analysis flow. Numbers are read from the cascade table, never typed."""
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent))
+from fig_style import *
+from matplotlib.patches import FancyBboxPatch
+cas = pd.read_csv(S.RESULTS / "table2_filter_cascade.csv"); full = S.load_table(True)
+g = lambda k: int(cas[cas.stage.str.contains(k, regex=False)].iloc[0].records)
+raw, merged, phen, binary, ver, final = g("Raw meropenem"), g("inner merge"), g("missing phenotype"), g("R/S"), g("verified-method"), g("final cohort")
+n_ann = int(full.has_annotation.sum())
+fig, ax = plt.subplots(figsize=(7.0, 9.0)); ax.set_xlim(0, 10); ax.set_ylim(0, 21); ax.axis("off")
+def box(x, y, w, h, text, fc="#F2F6FA", ec="#33566E", bold=False):
+    ax.add_patch(FancyBboxPatch((x, y), w, h, boxstyle="round,pad=0.02,rounding_size=0.12", fc=fc, ec=ec, lw=1))
+    ax.text(x + w / 2, y + h / 2, text, ha="center", va="center", fontsize=8.5, fontweight="bold" if bold else "normal", linespacing=1.35)
+def arrow(x1, y1, x2, y2):
+    ax.annotate("", xy=(x2, y2), xytext=(x1, y1), arrowprops=dict(arrowstyle="-|>", color="#33566E", lw=1, shrinkA=0, shrinkB=0))
+mx, mw, ex, ew, h, eh, step = 0.4, 4.6, 5.9, 3.7, 1.2, 1.0, 2.6
+cx = mx + mw / 2
+main = [(f"BV-BRC meropenem records\nn = {raw:,}", None),
+        (f"Joined to genome metadata\nn = {merged:,}", f"Lost at the join\nn = {raw - merged:,}"),
+        (f"Phenotype recorded\nn = {phen:,}", f"Phenotype missing\nn = {merged - phen:,}"),
+        (f"Resistant or susceptible\nn = {binary:,}", f"Intermediate or\ndose dependent, n = {phen - binary:,}"),
+        (f"Laboratory verified method\nn = {ver:,}", f"Not laboratory verified\nn = {binary - ver:,}"),
+        (f"Verified cohort, one record per genome\nn = {final:,}", f"Duplicate genome records\nn = {ver - final:,}")]
+top = 19.3; ys = []
+for i, (t, e) in enumerate(main):
+    y = top - i * step; ys.append(y); box(mx, y, mw, h, t, bold=(i == len(main) - 1))
+    if i:
+        arrow(cx, ys[i - 1], cx, y + h)
+        box(ex, y + h + (step - h - eh) / 2, ew, eh, e, fc="#FBF3EA", ec="#9A5B1B")
+        ym = y + h + (step - h) / 2; arrow(cx, ym, ex, ym)
+y = ys[-1] - step; box(mx, y, mw, h, f"Annotated cohort used for modelling\nn = {n_ann:,}")
+arrow(cx, ys[-1], cx, y + h)
+box(ex, y + h + (step - h - eh) / 2, ew, eh, f"No AMR annotation\nn = {final - n_ann:,}", fc="#FBF3EA", ec="#9A5B1B")
+ym = y + h + (step - h) / 2; arrow(cx, ym, ex, ym)
+names = ["Random 5-fold", "Lineage (MLST)\ngrouped", "Temporal\nholdout", "Leave-one-\nregion-out"]
+ybar = y - 0.9; ax.plot([1.45, 8.55], [ybar, ybar], color="#33566E", lw=1); ax.plot([cx, cx], [y, ybar], color="#33566E", lw=1)
+for i, t in enumerate(names):
+    x = 0.4 + i * 2.35; box(x, ybar - 1.9, 2.15, 1.4, t, fc="#EEF6F0", ec="#2F6B4F"); arrow(x + 1.075, ybar, x + 1.075, ybar - 0.5)
+ax.text(5, ybar - 2.4, "Validation analyses", ha="center", fontsize=8.5, color="#2F6B4F", style="italic")
+save(fig, "Figure1_study_flow")
